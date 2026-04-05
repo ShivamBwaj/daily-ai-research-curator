@@ -1,0 +1,9 @@
+research_agent/.env
+research_agent/.venv/
+research_agent/__pycache__/
+research_agent/**/__pycache__/
+research_agent/*.py[cod]
+research_agent/logs/
+research_agent/run_daily.bat
+research_agent/reports/*.md
+**/.DS_Store

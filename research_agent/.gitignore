@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+logs/
+run_daily.bat
