@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import urllib.parse
 from typing import Any
 
@@ -11,11 +12,18 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Official Atom API (RSS feeds omit items on weekends via skipDays; API is reliable.)
-ARXIV_API = "http://export.arxiv.org/api/query"
+# HTTPS; be polite — shared CI IPs (e.g. GitHub Actions) often get 429 without delays/retries.
+ARXIV_API = "https://export.arxiv.org/api/query"
 CATEGORIES = ("cs.AI", "cs.LG")
-USER_AGENT = "DailyResearchCurator/1.0 (mailto:local)"
+USER_AGENT = (
+    "DailyResearchCurator/1.0 "
+    "(+https://github.com/ShivamBwaj/daily-ai-research-curator; contact via repo)"
+)
 TIMEOUT = 60
+MAX_RETRIES = 5
+BACKOFF_BASE_SEC = 4
+# arXiv asks for ~3s between bulk requests; CI runners are easy to throttle.
+DELAY_BETWEEN_CATEGORIES_SEC = 5.0
 
 
 def _strip_summary(text: str) -> str:
@@ -54,20 +62,47 @@ def _fetch_category(label: str, max_results: int) -> list[dict[str, Any]]:
         "sortOrder": "descending",
     }
     url = f"{ARXIV_API}?{urllib.parse.urlencode(params)}"
-    try:
-        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT)
-        r.raise_for_status()
-    except requests.RequestException as e:
-        logger.warning("arXiv API request failed for %s: %s", label, e)
-        return []
+    headers = {"User-Agent": USER_AGENT}
 
-    parsed = feedparser.parse(r.content)
-    out: list[dict[str, Any]] = []
-    for entry in getattr(parsed, "entries", []) or []:
-        item = _entry_to_item(entry, label)
-        if item:
-            out.append(item)
-    return out
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = requests.get(url, headers=headers, timeout=TIMEOUT)
+            if r.status_code == 429:
+                wait = BACKOFF_BASE_SEC * (2**attempt)
+                logger.warning(
+                    "arXiv rate limited (429) for %s, sleeping %ss (attempt %s/%s)",
+                    label,
+                    wait,
+                    attempt + 1,
+                    MAX_RETRIES,
+                )
+                time.sleep(wait)
+                continue
+            if r.status_code >= 500:
+                wait = BACKOFF_BASE_SEC * (2**attempt)
+                logger.warning(
+                    "arXiv server error %s for %s, sleeping %ss",
+                    r.status_code,
+                    label,
+                    wait,
+                )
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            parsed = feedparser.parse(r.content)
+            out: list[dict[str, Any]] = []
+            for entry in getattr(parsed, "entries", []) or []:
+                item = _entry_to_item(entry, label)
+                if item:
+                    out.append(item)
+            return out
+        except requests.RequestException as e:
+            logger.warning("arXiv API request failed for %s: %s", label, e)
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(BACKOFF_BASE_SEC * (2**attempt))
+            else:
+                return []
+    return []
 
 
 def fetch_arxiv_papers(max_total: int = 20) -> list[dict[str, Any]]:
@@ -75,8 +110,9 @@ def fetch_arxiv_papers(max_total: int = 20) -> list[dict[str, Any]]:
     seen: set[str] = set()
     combined: list[dict[str, Any]] = []
 
-    for label in CATEGORIES:
-        # Request ``max_total`` per category so we still reach ``max_total`` after merge/dedupe.
+    for i, label in enumerate(CATEGORIES):
+        if i > 0:
+            time.sleep(DELAY_BETWEEN_CATEGORIES_SEC)
         batch = _fetch_category(label, max_total)
         for item in batch:
             key = item["link"]

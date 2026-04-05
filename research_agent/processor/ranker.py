@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from typing import Any
@@ -177,37 +178,47 @@ def rank_items(config: Config, normalized_items: list[dict[str, Any]]) -> list[d
     compact = _compact_for_llm(normalized_items)
     user_content = "Items to rank:\n" + json.dumps(compact, ensure_ascii=False)
 
-    client = genai.Client(api_key=config.google_api_key)
-    gen_config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        temperature=0.3,
-        response_mime_type="application/json",
-        max_output_tokens=8192,
-    )
+    # google-genai warns if both GEMINI_API_KEY and GOOGLE_API_KEY are set (common in Actions).
+    _restored: dict[str, str] = {}
+    if os.getenv("GEMINI_API_KEY") and os.getenv("GOOGLE_API_KEY"):
+        _restored["GOOGLE_API_KEY"] = os.environ.pop("GOOGLE_API_KEY", "")
 
     last_err: str | None = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = client.models.generate_content(
-                model=config.gemini_model,
-                contents=user_content,
-                config=gen_config,
-            )
-            raw = (response.text or "").strip()
-            parsed = _parse_ranking_response(raw)
-            if parsed:
-                return parsed
+    try:
+        client = genai.Client(api_key=config.google_api_key)
+        gen_config = types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.3,
+            response_mime_type="application/json",
+            max_output_tokens=8192,
+        )
 
-            last_err = "Could not parse or validate JSON from model output."
-            logger.warning("%s Snippet: %s", last_err, raw[:500])
-            time.sleep(1.5 * (attempt + 1))
-        except Exception as e:
-            last_err = str(e)
-            logger.exception("Gemini ranking attempt %s failed: %s", attempt + 1, e)
-            time.sleep(1.5 * (attempt + 1))
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = client.models.generate_content(
+                    model=config.gemini_model,
+                    contents=user_content,
+                    config=gen_config,
+                )
+                raw = (response.text or "").strip()
+                parsed = _parse_ranking_response(raw)
+                if parsed:
+                    return parsed
 
-    logger.error("Ranking failed after retries: %s", last_err)
-    return []
+                last_err = "Could not parse or validate JSON from model output."
+                logger.warning("%s Snippet: %s", last_err, raw[:500])
+                time.sleep(1.5 * (attempt + 1))
+            except Exception as e:
+                last_err = str(e)
+                logger.exception("Gemini ranking attempt %s failed: %s", attempt + 1, e)
+                time.sleep(1.5 * (attempt + 1))
+
+        logger.error("Ranking failed after retries: %s", last_err)
+        return []
+    finally:
+        for k, v in _restored.items():
+            if v:
+                os.environ[k] = v
 
 
 # --- Groq (OpenAI-compatible) — disabled; was hitting low TPM limits on large prompts. ---
