@@ -18,6 +18,8 @@ defaults:
 jobs:
   curator:
     runs-on: ubuntu-latest
+    # Must match GitHub Environment name so Environment secrets (not repo secrets) are available.
+    environment: env
     steps:
       - uses: actions/checkout@v4
 

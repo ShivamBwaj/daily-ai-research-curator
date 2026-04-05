@@ -12,6 +12,8 @@ permissions:
 jobs:
   curator:
     runs-on: ubuntu-latest
+    # Must match GitHub Environment name so Environment secrets are injected into ${{ secrets.* }}.
+    environment: env
     steps:
       - name: Checkout
         uses: actions/checkout@v4
