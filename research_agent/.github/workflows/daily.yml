@@ -1,4 +1,7 @@
-# Daily run at 8:00 AM IST (UTC+5:30 → 02:30 UTC)
+# Daily run at 8:00 AM IST (UTC+5:30 → 02:30 UTC).
+# `environment: env` uses Environment secrets. For unattended cron, disable Required reviewers on
+# Settings → Environments → env (see parent .github/workflows/daily.yml for full notes).
+
 name: Daily AI Research Curator
 
 on:
@@ -12,7 +15,6 @@ permissions:
 jobs:
   curator:
     runs-on: ubuntu-latest
-    # Must match GitHub Environment name so Environment secrets are injected into ${{ secrets.* }}.
     environment: env
     steps:
       - name: Checkout

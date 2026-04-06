@@ -1,5 +1,12 @@
 # Monorepo layout: repository root is the parent of `research_agent/`.
 # If your repo root IS `research_agent/`, use research_agent/.github/workflows/daily.yml instead.
+#
+# Schedule: cron is UTC. "30 2 * * *" = 02:30 UTC ≈ 08:00 IST (India, no DST).
+#
+# If the job does NOT run by itself at that time:
+# - Open Actions: look for a run stuck "Waiting" for environment approval (most common).
+# - Settings → Environments → env → turn OFF "Required reviewers" and "Wait timer" so cron is unattended.
+# - Optional: duplicate secrets into Repository secrets and remove `environment: env` from the job.
 
 name: Daily AI Research Curator
 
@@ -18,7 +25,8 @@ defaults:
 jobs:
   curator:
     runs-on: ubuntu-latest
-    # Must match GitHub Environment name so Environment secrets (not repo secrets) are available.
+    # Matches Environment `env` where your secrets live. If cron never runs unattended, open
+    # Settings → Environments → env and DISABLE "Required reviewers" / "Wait timer" (they block schedule).
     environment: env
     steps:
       - uses: actions/checkout@v4
